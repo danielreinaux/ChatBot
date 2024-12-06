@@ -1,0 +1,32 @@
+# Ignorar ambientes virtuais
+venv/
+.env
+
+# Ignorar arquivos do sistema operacional
+.DS_Store
+Thumbs.db
+
+# Ignorar dependências Python geradas
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Ignorar configurações do VSCode
+.vscode/
+
+# Ignorar arquivos de log e cache
+*.log
+*.sqlite3
+
+# Ignorar builds
+build/
+dist/
+
+# Ignorar outros arquivos temporários
+*.swp
+*.tmp
+*.bak
+
+# Exceção para o arquivo __init__.py
+!__init__.py
