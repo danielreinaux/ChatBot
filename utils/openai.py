@@ -1,9 +1,8 @@
 import os
 import openai
-from dotenv import load_dotenv
+import json
 
 # Carrega as variáveis de ambiente do arquivo .env
-load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 def process_response(user_input, expected_options):
@@ -57,3 +56,59 @@ def process_response(user_input, expected_options):
     except Exception as e:
         print(f"Erro ao processar resposta: {e}")
         return None
+
+
+def parse_order_items(user_input: str) -> dict:
+    """
+    Usa a API da OpenAI para analisar a lista de itens enviada pelo usuário
+    e retornar uma estrutura JSON com nome, quantidade e unidade de cada item.
+    Formato esperado:
+    {
+      "items": [
+        {"name": "Maçã", "quantity": 2, "unit": "kg"},
+        {"name": "Banana", "quantity": 1, "unit": "dúzia"}
+      ]
+    }
+
+    Caso não encontre itens, retornar {"items": []}.
+    """
+    messages = [
+        {
+            "role":"system",
+            "content": (
+                "Você é um assistente que extrai itens de uma lista de compras fornecida pelo usuário. "
+                "O usuário vai fornecer um texto com itens e quantidades. Você deve:\n"
+                "1. Identificar cada item, sua quantidade e unidade.\n"
+                "2. Retornar um JSON no formato: { \"items\": [ {\"name\": <string>, \"quantity\": <number>, \"unit\": <string>} ] }.\n"
+                "3. Sempre que possível, padronize a unidade para algo curto e simples (por exemplo: 'kg', 'un', 'duzia'). "
+                "   Se a unidade não for clara, tente inferir. Caso não seja possível, use 'unidades'.\n"
+                "4. O nome do item deve começar com letra maiúscula e o restante minúsculas (ex: 'Maçã', 'Banana', 'Alface').\n"
+                "5. A quantidade deve ser um número inteiro se possível. Se o usuário fornecer algo como 'meia dúzia', converta em número (ex: meia dúzia = 6).\n"
+                "6. Se não encontrar nenhum item, retorne {\"items\": []}.\n\n"
+                "Não adicione comentários, expliqueções ou texto extra fora do JSON. Retorne apenas o JSON final."
+            )
+        },
+        {
+            "role":"user",
+            "content": f"Texto do usuário: '{user_input}'"
+        }
+    ]
+
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=messages,
+            max_tokens=300,
+            temperature=0
+        )
+
+        content = response.choices[0].message['content'].strip()
+        data = json.loads(content)
+        # Garante que existe uma lista 'items'
+        if "items" not in data:
+            data = {"items": []}
+        return data
+
+    except Exception as e:
+        print(f"Erro ao chamar OpenAI: {e}")
+        return {"items": []}

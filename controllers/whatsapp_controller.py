@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from database.session import get_db
 from models.user import User
 import uuid
-from utils.openai import process_response
+from utils.openai import process_response, parse_order_items
 from utils.get_produtos import get_products_message
 
 
@@ -94,7 +94,6 @@ class WhatsAppController:
               existing_user = db.query(User).filter_by(phone=phone).first()
 
               if not existing_user:
-                  print('-----------------USUÁRIO NOVO')
                   # Gerar uma chave única para o novo usuário
                   user_key = str(uuid.uuid4())
 
@@ -110,7 +109,6 @@ class WhatsAppController:
                   db.add(new_user)
                   db.commit()
               else:
-                  print('-----------------USUÁRIO JÁ EXISTENTE')
                   # Se o usuário já existe, usa a chave dele
                   user_key = existing_user.key
 
@@ -123,8 +121,22 @@ class WhatsAppController:
 
             elif template_value == 2:
                 user = db.query(User).filter_by(key=last_template.user_sender).first()
+                user_name = user.full_name if user else ''
+                
+                if message == "1":
+                  # Usuário quer começar o pedido
+                  WhatsAppController.reply_single_message_template(
+                      phone,
+                      'template_inicial_compra_classificado',  # O template que pede os itens ao usuário
+                      user_name,  # Passamos o nome do usuário aqui no parâmetro para o template
+                      last_template.user_sender
+                  )
+                
+                  WhatsAppController.register_log(
+                      db, last_template.user_sender, phone,'template_inicial_compra_classificado',message_id,3
+                    )
 
-                if message == "2":
+                elif message == "2":
                   # Enviar a lista de produtos com as opções 1 e 2
                   products_message = get_products_message(db)  # Gera a mensagem com a lista de produtos
                   
@@ -146,8 +158,41 @@ class WhatsAppController:
                     )
 
             elif template_value == 3:
-                pass  # Implementar lógica para template 3
+                # Estado 3: O usuário já recebeu o template_inicial_compra_classificado e enviou itens.
+                user = db.query(User).filter_by(key=last_template.user_sender).first()
+                user_name = user.full_name if user else ''
+                
+                order_data = parse_order_items(message)
+                
+                items_list = order_data.get("items", [])
+                
+                if items_list:
+                  # Formatar a lista de itens em string
+                  # Por exemplo: "Maçã: 2kg, Banana: 1 dúzia, Cenoura: 3kg"
+                  formatted_items = []
+                  for item in items_list:
+                      name = item.get("name", "")
+                      quantity = item.get("quantity", "")
+                      unit = item.get("unit", "")
+                      formatted_items.append(f"{name}: {quantity}{unit}")
 
+                  items_str = ", ".join(formatted_items)
+                
+                # Enviar o template_processo_compra
+                # {{1}} = Nome do usuário
+                # {{2}} = itens formatados
+                WhatsAppController.reply_single_message_template(
+                    phone,
+                    'template_processo_compra',
+                    [user_name, items_str], 
+                    last_template.user_sender
+                )
+                
+                # Registrar log e atualizar o estado. Por ex, agora template_value = 6 (após exibir o resumo)
+                WhatsAppController.register_log(
+                    db, last_template.user_sender, phone, 'template_processo_compra', message_id, 6
+                )
+                
             elif template_value == 7:
                 pass  # Implementar lógica para template 7
               
@@ -251,12 +296,24 @@ class WhatsAppController:
             print(f"Erro ao enviar mensagem: {e}")
 
     @staticmethod
-    def reply_single_message_template(to: str, template_name: str, params: str, user_sender: str):
+    def reply_single_message_template(to: str, template_name: str, params, user_sender: str):
         """
-        Envia uma mensagem com template e parâmetros personalizados
+        Envia uma mensagem com template e parâmetros personalizados.
+        'params' pode ser uma string única ou uma lista de strings.
+        Cada string na lista corresponde a um parâmetro {{1}}, {{2}}, etc.
         """
         try:
-            # Monta o payload para enviar a mensagem com template
+            # Se 'params' for string, transforma em lista para ficar padronizado
+            if isinstance(params, str):
+                params = [params]
+
+            # Cria a lista de parâmetros no formato esperado
+            body_params = []
+            for p in params:
+                # Garante que 'p' é uma string
+                p = str(p)
+                body_params.append({"type": "text", "text": p})
+
             payload = {
                 "messaging_product": "whatsapp",
                 "to": to,
@@ -267,9 +324,7 @@ class WhatsAppController:
                     "components": [
                         {
                             "type": "body",
-                            "parameters": [
-                                {"type": "text", "text": params}
-                            ]
+                            "parameters": body_params
                         }
                     ]
                 }
@@ -293,12 +348,13 @@ class WhatsAppController:
             new_log = WhatsAppLog(
                 user_sender=user_sender,
                 phone=to,
-                message=params
+                message=" | ".join(params)  # Armazena todos os parâmetros separados por |
             )
             db.add(new_log)
             db.commit()
         except Exception as e:
             print(f"Erro ao enviar mensagem com template: {e}")
+
 
     @staticmethod
     def register_log(db: Session, user_sender: str, phone: str, message: str, message_id: str, template: int):
