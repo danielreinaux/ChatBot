@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from database.session import get_db
 from models.user import User
 import uuid
-from utils.openai import process_response, parse_order_items
+from utils.openai import process_response, parse_order_items, parse_all_items
 from utils.get_produtos import get_products_message
 
 
@@ -193,8 +193,102 @@ class WhatsAppController:
                     db, last_template.user_sender, phone, 'template_processo_compra', message_id, 6
                 )
                 
-            elif template_value == 7:
-                pass  # Implementar lógica para template 7
+            elif template_value == 6:
+                # Nesse estado, o usuário já recebeu o processo_compra e agora responde S ou N
+                user_key = last_template.user_sender
+                user = db.query(User).filter_by(key=user_key).first()
+                user_name = user.full_name if user else ''
+                
+                # Padronizar a resposta do usuário (S/N)
+                user_choice = message.strip().upper()
+                
+                if user_choice == "S":
+                    # Usuário quer adicionar mais itens
+                    # Antes, você enviava o template_inicial_compra_classificado novamente.
+                    
+                    # Agora, vamos mudar a estratégia:
+                    # Primeiro, envie uma mensagem dizendo "Continuando seu pedido..."
+                    WhatsAppController.reply_single_message_template(
+                        phone,
+                        'template_base',  # Supondo que você use template_base para mensagens genéricas
+                        'Continuando seu pedido... Por favor, envie mais itens que deseja adicionar.',
+                        user_key
+                    )
+                    WhatsAppController.register_log(
+                        db, user_key, phone, 'template_base', message_id, 3  # Agora voltamos ao estado 3 para receber itens
+                    )
+
+                    # Em seguida, se quiser reforçar o exemplo de formato (opcional):
+                    WhatsAppController.reply_single_message_template(
+                        phone,
+                        'template_base',
+                        "Por exemplo:\n- Maçã: 2kg\n- Banana: 1 dúzia\n- Cenoura: 3kg\n\nEstou aqui para ajudar caso tenha dúvidas! 😊",
+                        user_key
+                    )
+                    # Como já definimos que vamos voltar ao template=3 (estado de inserir itens), basta registrar novamente o log.
+                    WhatsAppController.register_log(
+                        db, user_key, phone, 'template_base', message_id, 3
+                    )
+
+
+                elif user_choice == "N":
+                  # Usuário não quer mais itens. Agora precisamos juntar todos os itens do template=3
+                  all_user_messages = db.query(WhatsAppLog)\
+                    .filter_by(phone=phone)\
+                    .filter(WhatsAppLog.user_sender == user_key)\
+                    .order_by(WhatsAppLog.id.asc())\
+                    .all()
+
+                  user_messages_text = ""
+                  for log_entry in all_user_messages:
+                      user_messages_text += f"{log_entry.message}\n"
+                    
+                  
+
+                  all_items = []
+                  for log_entry in all_user_messages:
+                      parsed_data = parse_order_items(log_entry.message)
+                      msg_items = parsed_data.get("items", [])
+                      all_items.extend(msg_items)
+
+
+                  all_items = parse_all_items(user_messages_text)
+
+                  # Formatar todos os itens
+                  formatted_items = []
+                  for item in all_items:
+                      name = item.get("name", "")
+                      quantity = item.get("quantity", "")
+                      unit = item.get("unit", "")
+                      formatted_items.append(f"{name}: {quantity}{unit}")
+
+                  items_str = ", ".join(formatted_items) if formatted_items else "Nenhum item encontrado."
+
+                  final_message = "Agradeço desde já, " + user_name
+                  WhatsAppController.reply_single_message_template(
+                      phone,
+                      'template_finalizar_pedido',
+                      [items_str, final_message],
+                      user_key
+                  )
+
+                  WhatsAppController.register_log(
+                      db, user_key, phone, 'template_finalizar_pedido', message_id, 7
+                  )
+                  
+                else:
+                  # Resposta inválida, peça novamente S ou N
+                  WhatsAppController.reply_single_message_template(
+                      phone,
+                      'template_base',
+                      'Por favor, responda S (Sim) ou N (Não).',
+                      user_key
+                  )
+                  # Mantém template_value = 6
+                  WhatsAppController.register_log(
+                      db, user_key, phone, 'template_base', message_id, 6
+                  )
+                  
               
             elif template_value == 4:
               # Aqui o usuário já recebeu a lista de produtos e as opções (1) Voltar ao menu principal e (2) Encerrar atendimento.
@@ -370,3 +464,56 @@ class WhatsAppController:
             db.commit()
         except Exception as e:
             print(f"Erro ao registrar log: {e}")
+
+
+        @staticmethod
+        def reply_text_message(to: str, user_sender: str, text: str, params=None):
+            """
+            Envia uma mensagem de texto simples para o destinatário (sem template).
+            
+            Args:
+                to (str): Número de telefone do destinatário no formato internacional (ex: '5511999999999').
+                user_sender (str): Identificador do usuário que está enviando (podendo ser 'bot' ou user_key).
+                text (str): Texto base da mensagem, podendo conter placeholders.
+                params (list, optional): Lista de parâmetros que serão formatados no texto. 
+                                        Por exemplo, se text for "Olá, {0}, seu pedido é {1}", 
+                                        e params for ["Daniel", "Maçã: 2kg"], o texto final será 
+                                        "Olá, Daniel, seu pedido é Maçã: 2kg".
+            """
+            try:
+                if params and len(params) > 0:
+                    text = text.format(*params)
+
+                payload = {
+                    "messaging_product": "whatsapp",
+                    "to": to,
+                    "type": "text",
+                    "text": {
+                        "body": text
+                    }
+                }
+
+                headers = {
+                    "Authorization": f"Bearer {os.getenv('WHATSAPP_BUSINESS_TOKEN')}",
+                    "Content-Type": "application/json"
+                }
+
+                url = os.getenv("WHATSAPP_BUSINESS_URL")
+
+                # Faz a requisição para enviar a mensagem
+                response = requests.post(url, json=payload, headers=headers)
+                response_data = response.json()
+                print(f"Mensagem enviada: {response_data}")
+
+                # Salva o log no banco de dados
+                db = next(get_db())
+                new_log = WhatsAppLog(
+                    user_sender=user_sender,
+                    phone=to,
+                    message=text
+                )
+                db.add(new_log)
+                db.commit()
+
+            except Exception as e:
+                print(f"Erro ao enviar mensagem de texto: {e}")

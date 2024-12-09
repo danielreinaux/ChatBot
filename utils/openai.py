@@ -112,3 +112,34 @@ def parse_order_items(user_input: str) -> dict:
     except Exception as e:
         print(f"Erro ao chamar OpenAI: {e}")
         return {"items": []}
+
+def parse_all_items(user_messages_text: str) -> list:
+    # Prompt explicando ao GPT o que fazer:
+    prompt = (
+        "O usuário enviou várias mensagens contendo possivelmente itens e quantidades. "
+        "Você deve analisar todas as mensagens abaixo e retornar apenas os itens pedidos, "
+        "no formato JSON, por exemplo:\n"
+        "{ \"items\": [ {\"name\": \"Maçã\", \"quantity\": 2, \"unit\": \"un\"}, ... ]}\n\n"
+        "Se não encontrar itens, retorne {\"items\": []}.\n\n"
+        "Mensagens do usuário:\n"
+        f"{user_messages_text}"
+    )
+
+    # Aqui você chama a função da OpenAI (ChatCompletion)
+    # Certifique-se de ter sua chave da OpenAI e tudo configurado.
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": "Você é um assistente que extrai itens de pedido."},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.0
+    )
+
+    content = response.choices[0].message['content'].strip()
+    import json
+    try:
+        data = json.loads(content)
+    except:
+        data = {"items": []}
+    return data.get("items", [])
