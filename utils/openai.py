@@ -62,37 +62,36 @@ def parse_order_items(user_input: str) -> dict:
     """
     Usa a API da OpenAI para analisar a lista de itens enviada pelo usuário
     e retornar uma estrutura JSON com nome, quantidade e unidade de cada item.
-    Formato esperado:
-    {
-      "items": [
-        {"name": "Maçã", "quantity": 2, "unit": "kg"},
-        {"name": "Banana", "quantity": 1, "unit": "dúzia"}
-      ]
-    }
-
-    Caso não encontre itens, retornar {"items": []}.
     """
     messages = [
-        {
-            "role":"system",
-            "content": (
-                "Você é um assistente que extrai itens de uma lista de compras fornecida pelo usuário. "
-                "O usuário vai fornecer um texto com itens e quantidades. Você deve:\n"
-                "1. Identificar cada item, sua quantidade e unidade.\n"
-                "2. Retornar um JSON no formato: { \"items\": [ {\"name\": <string>, \"quantity\": <number>, \"unit\": <string>} ] }.\n"
-                "3. Sempre que possível, padronize a unidade para algo curto e simples (por exemplo: 'kg', 'un', 'duzia'). "
-                "   Se a unidade não for clara, tente inferir. Caso não seja possível, use 'unidades'.\n"
-                "4. O nome do item deve começar com letra maiúscula e o restante minúsculas (ex: 'Maçã', 'Banana', 'Alface').\n"
-                "5. A quantidade deve ser um número inteiro se possível. Se o usuário fornecer algo como 'meia dúzia', converta em número (ex: meia dúzia = 6).\n"
-                "6. Se não encontrar nenhum item, retorne {\"items\": []}.\n\n"
-                "Não adicione comentários, expliqueções ou texto extra fora do JSON. Retorne apenas o JSON final."
-            )
-        },
-        {
-            "role":"user",
-            "content": f"Texto do usuário: '{user_input}'"
+    {
+        "role": "system",
+        "content": (
+            "Você é um assistente que extrai itens de uma lista de compras fornecida pelo usuário. "
+            "Sua tarefa é identificar os itens, corrigir erros de digitação comuns e fornecer as quantidades e unidades correspondentes.\n\n"
+            "Instruções detalhadas:\n"
+            "1. Identifique cada item, sua quantidade e unidade a partir do texto fornecido.\n"
+            "2. Corrija erros de digitação comuns nos nomes dos itens (por exemplo, 'maça' para 'Maçã', 'cebol' para 'Cebola').\n"
+            "3. Retorne um JSON no formato: { \"items\": [ {\"name\": <string>, \"quantity\": <number>, \"unit\": <string>} ] }.\n"
+            "4. Sempre que possível, padronize a unidade para algo curto e simples (por exemplo: 'kg', 'un', 'duzia'). "
+            "   Se a unidade não for clara, tente inferir. Caso não seja possível, use 'unidades'.\n"
+            "5. O nome do item deve começar com letra maiúscula e o restante em minúsculas (ex: 'Maçã', 'Banana', 'Alface').\n"
+            "6. A quantidade deve ser um número inteiro sempre que possível. Converta expressões como 'meia dúzia' para 6.\n"
+            "7. Se não encontrar nenhum item, retorne {\"items\": []}.\n\n"
+            "Exemplos de correções automáticas:\n"
+            "- 'maça' deve ser corrigido para 'Maçã'\n"
+            "- 'cebol' deve ser corrigido para 'Cebola'\n"
+            "- 'tomate' já está correto\n"
+            "- 'laranja' já está correto\n\n"
+            "Não adicione comentários, explicações ou texto extra fora do JSON. Retorne apenas o JSON final."
+        )
+    },
+    {
+        "role": "user",
+        "content": f"Texto do usuário: '{user_input}'"
         }
     ]
+
 
     try:
         response = openai.ChatCompletion.create(
@@ -104,7 +103,7 @@ def parse_order_items(user_input: str) -> dict:
 
         content = response.choices[0].message['content'].strip()
         data = json.loads(content)
-        # Garante que existe uma lista 'items'
+
         if "items" not in data:
             data = {"items": []}
         return data
@@ -112,6 +111,7 @@ def parse_order_items(user_input: str) -> dict:
     except Exception as e:
         print(f"Erro ao chamar OpenAI: {e}")
         return {"items": []}
+
 
 def parse_all_items(user_messages_text: str) -> list:
     # Prompt explicando ao GPT o que fazer:

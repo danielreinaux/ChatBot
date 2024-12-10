@@ -85,7 +85,36 @@ Seu pedido está quase pronto! Aqui está o resumo:
 
 {{1}}
 
-Por favor, confirme se está tudo certo.
+Está tudo certo?
 
-{{2}}
+S = Sim
+N = Não
+
+""",
+"template_pedido_para_casa": """
+Entendi, então você quer pedir para sua casa. 🏠
+
+Para continuarmos, por favor, fale seu nome. 😊
+""",
+    "mensagem_processo_compra": """
+    
+Seu pedido foi atualizado com os itens abaixo:
+
+{{1}}
+
+Por favor, confirme se está correto.
+Deseja adicionar mais itens?
+
+Responda:
+S = Sim
+N = Não
+""",
+"template_opcoes_modificacao": """
+Entendi. O que você gostaria de fazer?
+
+1️⃣ Adicionar algo ao pedido  
+2️⃣ Remover algo do pedido  
+3️⃣ Modificar algum item do pedido
+
+Por favor, responda com o número da opção desejada.
 """}
