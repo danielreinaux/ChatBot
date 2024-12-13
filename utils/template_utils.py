@@ -4,14 +4,14 @@ from utils.message_utils import (
     reply_single_message_template,
     reply_text_message
 )
-from utils.openai import parse_order_items, process_response
+from utils.openai import parse_order_items, process_response, parse_items_to_remove
 from utils.get_produtos import get_products_message
 from utils.message_templates import TEMPLATES
 from models.user import User
 import uuid
 from sqlalchemy.orm import Session
 from models.whatsapp_log import WhatsAppLog
-from utils.aux_utils import format_order_items, finalize_order, continue_order, handle_invalid_response
+from utils.aux_utils import format_order_items, finalize_order, continue_order, handle_invalid_response, get_order_items_from_logs, remove_selected_items, respond_with_updated_order
 
 def handle_template_0(db, phone, message, message_id):
     """
@@ -197,7 +197,7 @@ def handle_template_5(db, phone, message, message_id, last_template):
         'O atendimento já foi encerrado. Caso necessite de algo mais, por favor inicie uma nova conversa. 😊',
         'bot'
     )
-    register_log(db, user_key, phone, 'template_base', message_id, 5)
+    register_log(db, user_key, phone, 'template_base', message_id, 0)
     
 def handle_template_7(db, phone, message, message_id, last_template):
     """
@@ -257,10 +257,14 @@ def handle_template_9(db, phone, message, message_id, last_template):
 
         filtered_messages = [
             log_entry.message for log_entry in all_user_messages
-            if not log_entry.message.startswith("Por exemplo") and "por favor" in log_entry.message.lower()
+            if not log_entry.message.startswith("Por exemplo") and 
+              ("por favor" in log_entry.message.lower() or "os seguintes itens foram removidos:" in log_entry.message.lower())
         ]
 
+
         user_messages_text = "\n".join(filtered_messages)
+        
+        print(f'Printando as mensagens capturadas 2 {user_messages_text}')
         order_data = parse_order_items(user_messages_text)
         items_list = order_data.get("items", [])
 
@@ -274,11 +278,14 @@ def handle_template_9(db, phone, message, message_id, last_template):
         )
         register_log(db, user_key, phone, 'template_remover_itens', message_id, 10)
     elif message == "3":
+        # Modificar itens do pedido e mostrar a lista atual
         reply_text_message(
             phone,
-            "Por favor, informe qual item você deseja modificar e o novo detalhe (quantidade ou unidade).\n\nPor exemplo:\n'Maçã: 5 kg' para modificar a quantidade de maçã para 5 kg.",
+            f"Aqui estão os itens do seu pedido atual:\n\n{items_str}\n\n"
+            "Por favor, informe qual item você deseja modificar e o novo detalhe (quantidade ou unidade).\n\n"
+            "Por exemplo:\n'Maçã: 5 kg' para modificar a quantidade de maçã para 5 kg.",
             [],
-            'bot'
+            user_key
         )
         register_log(db, user_key, phone, 'template_modificar_itens', message_id, 11)
     else:
@@ -290,3 +297,49 @@ def handle_template_9(db, phone, message, message_id, last_template):
         )
         register_log(db, user_key, phone, 'template_opcoes_modificacao', message_id, 9)
         
+def handle_template_10(db, phone, message, message_id, last_template):
+    """
+    Lida com o template_value == 10, removendo os itens selecionados pelo usuário.
+    """
+    user_key = last_template.user_sender if last_template and last_template.user_sender else 'bot'
+
+    # Recuperar itens do pedido
+    items_list = get_order_items_from_logs(db, phone)
+
+    if not items_list:
+        reply_text_message(
+            phone,
+            "Não há itens no seu pedido para remover.",
+            [],
+            'bot'
+        )
+        register_log(db, user_key, phone, 'template_sem_itens', message_id, 9)
+        return
+
+    # Identificar itens para remover usando OpenAI
+    items_to_remove = parse_items_to_remove(message, items_list) or []
+
+    if not items_to_remove:
+        reply_text_message(
+            phone,
+            "Não consegui identificar os itens que você deseja remover. Por favor, tente novamente.",
+            [],
+            'bot'
+        )
+        register_log(db, user_key, phone, 'template_remover_itens_falha', message_id, 10)
+        return
+
+    # Remover itens e obter lista atualizada
+    updated_items_list = remove_selected_items(items_list, items_to_remove)
+
+    if not updated_items_list:
+        reply_text_message(
+            phone,
+            "Todos os itens foram removidos do pedido. O pedido agora está vazio.",
+            [],
+            'bot'
+        )
+        register_log(db, user_key, phone, 'template_pedido_vazio', message_id, 9)
+        return
+
+    respond_with_updated_order(db, phone, items_to_remove, updated_items_list, message_id, user_key)

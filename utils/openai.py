@@ -114,7 +114,16 @@ def parse_order_items(user_input: str) -> dict:
 
 
 def parse_all_items(user_messages_text: str) -> list:
-    # Prompt explicando ao GPT o que fazer:
+    """
+    Analisa todas as mensagens do usuário e retorna os itens pedidos,
+    excluindo aqueles que foram removidos.
+
+    Args:
+        user_messages_text (str): Texto consolidado das mensagens do usuário.
+
+    Returns:
+        list: Lista de itens restantes no pedido.
+    """
     prompt = (
         "O usuário enviou várias mensagens contendo possivelmente itens e quantidades. "
         "Você deve analisar todas as mensagens abaixo e retornar apenas os itens pedidos, "
@@ -124,6 +133,7 @@ def parse_all_items(user_messages_text: str) -> list:
         "Mensagens do usuário:\n"
         f"{user_messages_text}"
     )
+
 
     # Aqui você chama a função da OpenAI (ChatCompletion)
     # Certifique-se de ter sua chave da OpenAI e tudo configurado.
@@ -143,3 +153,50 @@ def parse_all_items(user_messages_text: str) -> list:
     except:
         data = {"items": []}
     return data.get("items", [])
+
+
+def parse_items_to_remove(user_input: str, items_list: list) -> list:
+    """
+    Usa a API da OpenAI para identificar os itens que o usuário deseja remover da lista.
+
+    Args:
+        user_input (str): Mensagem do usuário especificando os itens a remover.
+        items_list (list): Lista atual de itens.
+
+    Returns:
+        list: Lista de itens a serem removidos.
+    """
+    item_names = [item.get("name", "") for item in items_list]
+    item_names_str = ", ".join(item_names)
+
+    prompt = (
+        f"O usuário forneceu a seguinte lista de itens: {item_names_str}.\n"
+        f"Com base na mensagem: '{user_input}', identifique quais itens da lista o usuário deseja remover.\n"
+        "Responda com os nomes exatos dos itens que devem ser removidos em formato JSON, por exemplo:\n"
+        "{ \"items_to_remove\": [\"Maçã\", \"Banana\"] }\n"
+        "Se não encontrar nenhum item para remover, retorne {\"items_to_remove\": []}."
+    )
+
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "Você é um assistente que identifica itens a serem removidos de uma lista."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=100,
+            temperature=0
+        )
+
+        content = response.choices[0].message['content'].strip()
+        data = json.loads(content)
+        items_to_remove_names = data.get("items_to_remove", [])
+
+        # Filtrar os itens originais que correspondem aos nomes identificados
+        items_to_remove = [item for item in items_list if item.get("name", "") in items_to_remove_names]
+
+        return items_to_remove
+
+    except Exception as e:
+        print(f"Erro ao chamar OpenAI para identificar itens a remover: {e}")
+        return []
