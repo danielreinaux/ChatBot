@@ -98,10 +98,11 @@ Para continuarmos, por favor, fale seu nome. 😊
 """,
     "mensagem_processo_compra": """
     
-Seu pedido foi atualizado com os itens abaixo:
+Seu pedido foi atualizado com os itens nesta etapa:
 
 {{1}}
 
+Caso você tenha solicitado itens anteriormente, eles continuam no seu pedido
 Por favor, confirme se está correto.
 Deseja adicionar mais itens?
 

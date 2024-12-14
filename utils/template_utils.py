@@ -12,6 +12,7 @@ import uuid
 from sqlalchemy.orm import Session
 from models.whatsapp_log import WhatsAppLog
 from utils.aux_utils import format_order_items, finalize_order, continue_order, handle_invalid_response, get_order_items_from_logs, remove_selected_items, respond_with_updated_order, get_last_final_list_message, create_venda
+from sqlalchemy import text
 
 def handle_template_0(db, phone, message, message_id):
     """
@@ -38,13 +39,16 @@ def handle_template_99(db, phone, message, message_id):
     elif interpreted_message == "2":
         # Caso o usuário escolha a opção 2
         reply_single_message_template(
-            phone, 'template_base', 'Em breve nosso consultor entrará em contato.', 'bot'
+            phone, 'template_base', 'Em breve nossa equipe entrará em contato para atendê-lo', 'bot'
         )
         register_log(db, '', phone, 'template_base', message_id, 98)
+        # Gatilho por enquanto mockado:
+        #trigger_b2b_notification(phone)
     else:
         # Para qualquer outra resposta
         reply_single_message(phone, 'template_primeiro_contato', message, 'bot')
         register_log(db, '', phone, 'template_base', message_id, 99)
+        
 
 def handle_template_1(db, phone, message, message_id):
     """
@@ -148,7 +152,6 @@ def handle_template_3(db, phone, message, message_id, last_template):
         db, last_template.user_sender, phone, 'template_processo_compra', message_id, 6
     )
 
-
 def handle_template_6(db: Session, phone: str, message: str, message_id: str, last_template):
     """
     Lida com o template_value == 6, processando a resposta do usuário (S ou N) para adicionar ou finalizar o pedido.
@@ -211,12 +214,10 @@ def handle_template_7(db: Session, phone: str, message: str, message_id: str, la
             [],
             user_key
         )
-        register_log(db, user_key, phone, "Pedido confirmado", message_id, 8)
+        register_log(db, user_key, phone, "Pedido confirmado", message_id, 12)
 
         # Buscar a última mensagem do bot que contenha "Lista atualizada Final:"
         last_final_list_msg = get_last_final_list_message(db, phone)
-        print('-----------------------Mensagem final------------------------')
-        print(last_final_list_msg)
         if last_final_list_msg:
             # Extrair itens usando o GPT
             order_data = parse_final_order_from_message(last_final_list_msg)
@@ -226,8 +227,15 @@ def handle_template_7(db: Session, phone: str, message: str, message_id: str, la
             create_venda(db, user, items_list)
 
     elif user_choice == "N":
-        # Lógica caso o usuário queira modificar
-        pass
+        # Se não está tudo certo, redirecionar para o menu de modificação (template 9)
+        reply_text_message(
+            phone,
+            TEMPLATES["template_opcoes_modificacao"],  # Mensagem que pergunta se quer adicionar/remover/modificar
+            [],
+            user_key
+        )
+        register_log(db, user_key, phone, "Pedido para modificação", message_id, 9)
+        
     else:
         reply_text_message(
             phone,
@@ -407,3 +415,81 @@ def handle_template_11(db, phone, message, message_id, last_template):
     )
 
     register_log(db, user_key, phone, 'template_modificar_itens', message_id, 7)
+
+def handle_template_12(db: Session, phone: str, message: str, message_id: str, last_template):
+    user_key = last_template.user_sender
+    user = db.query(User).filter_by(key=user_key).first()
+    
+    reply_text_message(
+        phone,
+        "Vimos que você já realizou um pedido.\n\n"
+        "1️⃣ Ver status e itens do pedido\n"
+        "2️⃣ Fazer um novo pedido",
+        [],
+        user_key
+    )
+    # Agora, aguardamos a escolha do usuário no template 14
+    register_log(db, user_key, phone, "Menu intermediário após pedido", message_id, 13)
+    
+def handle_template_13(db: Session, phone: str, message: str, message_id: str, last_template):
+    user_key = last_template.user_sender
+    user = db.query(User).filter_by(key=user_key).first()
+    choice = message.strip()
+
+    if choice == "1":
+        # Exibe status do último pedido
+        venda = db.execute(
+            text("""
+              SELECT * FROM vendas
+              WHERE phone = :phone
+              ORDER BY created_at DESC
+              LIMIT 1
+          """), {"phone": user.phone}).fetchone()
+
+        if venda:
+            items_list = venda.produtos
+            status = venda.status
+            items_str = format_order_items(items_list)
+
+            reply_text_message(
+                phone,
+                f"Seu pedido atual está com status: {status}.\n\n"
+                f"Aqui estão os itens do seu pedido:\n{items_str}\n\n"
+                "Algo mais que possa ajudar?",
+                [],
+                user_key
+            )
+
+            register_log(db, user_key, phone, 'template_inicial_classificado', message_id, 12)
+
+        else:
+            reply_text_message(
+                phone,
+                "Não encontramos nenhum pedido registrado para este número.",
+                [],
+                user_key
+            )
+            # Mesmo sem pedidos, chamar menu inicial
+            user_name = user.full_name if user else ''
+            reply_single_message_template(
+                phone, 'template_inicial_classificado', user_name, 'bot'
+            )
+            register_log(db, user_key, phone, 'template_inicial_classificado', message_id, 2)
+
+    elif choice == "2":
+        # Fazer novo pedido - vai direto ao menu inicial classificado
+        user_name = user.full_name if user else ''
+        reply_single_message_template(
+            phone, 'template_inicial_classificado', user_name, 'bot'
+        )
+        register_log(db, user_key, phone, 'template_inicial_classificado', message_id, 2)
+
+    else:
+        # Se inválido, repete as opções do template 14
+        reply_text_message(
+            phone,
+            "Opção inválida. Por favor, escolha:\n1️⃣ Ver status do pedido\n2️⃣ Fazer um novo pedido",
+            [],
+            user_key
+        )
+        register_log(db, user_key, phone, "menu_pos_finalizacao_invalido", message_id, 13)
