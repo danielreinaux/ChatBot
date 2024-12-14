@@ -62,36 +62,40 @@ def parse_order_items(user_input: str) -> dict:
     """
     Usa a API da OpenAI para analisar a lista de itens enviada pelo usuário
     e retornar uma estrutura JSON com nome, quantidade e unidade de cada item.
+    Prioriza itens modificados caso haja duplicidade.
     """
     messages = [
-    {
-        "role": "system",
-        "content": (
-            "Você é um assistente que extrai itens de uma lista de compras fornecida pelo usuário. "
-            "Sua tarefa é identificar os itens, corrigir erros de digitação comuns e fornecer as quantidades e unidades correspondentes.\n\n"
-            "Instruções detalhadas:\n"
-            "1. Identifique cada item, sua quantidade e unidade a partir do texto fornecido.\n"
-            "2. Corrija erros de digitação comuns nos nomes dos itens (por exemplo, 'maça' para 'Maçã', 'cebol' para 'Cebola').\n"
-            "3. Retorne um JSON no formato: { \"items\": [ {\"name\": <string>, \"quantity\": <number>, \"unit\": <string>} ] }.\n"
-            "4. Sempre que possível, padronize a unidade para algo curto e simples (por exemplo: 'kg', 'un', 'duzia'). "
-            "   Se a unidade não for clara, tente inferir. Caso não seja possível, use 'unidades'.\n"
-            "5. O nome do item deve começar com letra maiúscula e o restante em minúsculas (ex: 'Maçã', 'Banana', 'Alface').\n"
-            "6. A quantidade deve ser um número inteiro sempre que possível. Converta expressões como 'meia dúzia' para 6.\n"
-            "7. Se não encontrar nenhum item, retorne {\"items\": []}.\n\n"
-            "Exemplos de correções automáticas:\n"
-            "- 'maça' deve ser corrigido para 'Maçã'\n"
-            "- 'cebol' deve ser corrigido para 'Cebola'\n"
-            "- 'tomate' já está correto\n"
-            "- 'laranja' já está correto\n\n"
-            "Não adicione comentários, explicações ou texto extra fora do JSON. Retorne apenas o JSON final."
-        )
-    },
-    {
-        "role": "user",
-        "content": f"Texto do usuário: '{user_input}'"
+        {
+            "role": "system",
+            "content": (
+                "Você é um assistente que extrai itens de uma lista de compras fornecida pelo usuário. "
+                "Sua tarefa é identificar os itens, corrigir erros de digitação comuns e fornecer as quantidades e unidades correspondentes.\n\n"
+                
+                "Instruções detalhadas:\n"
+                "1. Identifique cada item, sua quantidade e unidade a partir do texto fornecido.\n"
+                "2. Se a mensagem contiver a frase 'Os seguintes itens foram modificados:', extraia os itens listados após essa frase.\n"
+                "3. Se houver itens duplicados, o item modificado deve substituir a versão anterior. Priorize sempre o item modificado em caso de conflito.\n"
+                "4. Corrija erros de digitação comuns nos nomes dos itens (por exemplo, 'maça' para 'Maçã', 'cebol' para 'Cebola').\n"
+                "5. Retorne um JSON no formato: { \"items\": [ {\"name\": <string>, \"quantity\": <number>, \"unit\": <string>} ] }.\n"
+                "6. Sempre que possível, padronize a unidade para algo curto e simples (por exemplo: 'kg', 'un', 'duzia'). "
+                "   Se a unidade não for clara, tente inferir. Caso não seja possível, use 'unidades'.\n"
+                "7. O nome do item deve começar com letra maiúscula e o restante em minúsculas (ex: 'Maçã', 'Banana', 'Alface').\n"
+                "8. A quantidade deve ser um número inteiro sempre que possível. Converta expressões como 'meia dúzia' para 6.\n"
+                "9. Se não encontrar nenhum item, retorne {\"items\": []}.\n\n"
+                
+                "Exemplo de cenário com duplicatas e itens modificados:\n"
+                "- Lista original: 'Maçã: 2 kg'\n"
+                "- Modificação: 'Os seguintes itens foram modificados:\n\nMaçã: 3 kg'\n"
+                "- Saída esperada: { \"items\": [ {\"name\": \"Maçã\", \"quantity\": 3, \"unit\": \"kg\"} ] }\n\n"
+                
+                "Não adicione comentários, explicações ou texto extra fora do JSON. Retorne apenas o JSON final."
+            )
+        },
+        {
+            "role": "user",
+            "content": f"Texto do usuário: '{user_input}'"
         }
     ]
-
 
     try:
         response = openai.ChatCompletion.create(
@@ -111,6 +115,7 @@ def parse_order_items(user_input: str) -> dict:
     except Exception as e:
         print(f"Erro ao chamar OpenAI: {e}")
         return {"items": []}
+
 
 
 def parse_all_items(user_messages_text: str) -> list:
@@ -199,4 +204,51 @@ def parse_items_to_remove(user_input: str, items_list: list) -> list:
 
     except Exception as e:
         print(f"Erro ao chamar OpenAI para identificar itens a remover: {e}")
+        return []
+      
+
+def parse_items_to_modify(message, items_list):
+    """
+    Usa a OpenAI para identificar os itens a serem modificados e seus novos detalhes com base na mensagem do usuário.
+
+    Args:
+        message (str): Mensagem do usuário.
+        items_list (list): Lista atual de itens no pedido.
+
+    Returns:
+        list: Lista de itens modificados no formato [{"name": "item", "quantity": X, "unit": "Y"}].
+    """
+    item_names = [f"{item.get('name', '')}: {item.get('quantity', '')} {item.get('unit', '')}" for item in items_list]
+    item_names_str = "\n".join(item_names)
+
+    prompt = (
+        "O usuário enviou uma mensagem solicitando a modificação de itens no pedido. "
+        "A lista atual de itens é a seguinte:\n\n"
+        f"{item_names_str}\n\n"
+        "Identifique os itens que devem ser modificados na mensagem do usuário e forneça os novos detalhes. "
+        "Retorne apenas os itens modificados no formato JSON, por exemplo:\n"
+        "{ \"items\": [ {\"name\": \"Maçã\", \"quantity\": 5, \"unit\": \"kg\"} ] }\n\n"
+        "Se não conseguir identificar modificações, retorne:\n"
+        "{ \"items\": [] }\n\n"
+        f"Mensagem do usuário:\n{message}"
+    )
+
+    try:
+        # Chamar a API da OpenAI
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "Você é um assistente que modifica itens de pedidos com base em instruções do usuário."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.0
+        )
+
+        content = response.choices[0].message['content'].strip()
+        data = json.loads(content)
+
+        return data.get("items", [])
+
+    except Exception as e:
+        print(f"Erro ao chamar OpenAI: {e}")
         return []

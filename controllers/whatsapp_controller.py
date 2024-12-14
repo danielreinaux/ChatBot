@@ -8,7 +8,7 @@ import uuid
 from utils.openai import parse_order_items, parse_all_items
 from utils.get_produtos import get_products_message
 from utils.message_templates import TEMPLATES
-from utils.template_utils import handle_template_0, handle_template_99, handle_template_1, handle_template_2, handle_template_3, handle_template_6, handle_template_4, handle_template_5, handle_template_7, handle_template_9, handle_template_10
+from utils.template_utils import handle_template_0, handle_template_99, handle_template_1, handle_template_2, handle_template_3, handle_template_6, handle_template_4, handle_template_5, handle_template_7, handle_template_9, handle_template_10, handle_template_11
 from utils.message_utils import reply_single_message, reply_single_message_template, reply_text_message, register_log, get_last_template
 
 
@@ -88,6 +88,9 @@ class WhatsAppController:
               
             elif template_value == 10:
               handle_template_10(db, phone, message, message_id, last_template)
+              
+            elif template_value == 11:
+              handle_template_11(db, phone, message, message_id, last_template)
                 
 
         except Exception as e:

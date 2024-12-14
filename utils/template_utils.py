@@ -4,7 +4,7 @@ from utils.message_utils import (
     reply_single_message_template,
     reply_text_message
 )
-from utils.openai import parse_order_items, process_response, parse_items_to_remove
+from utils.openai import parse_order_items, process_response, parse_items_to_remove, parse_items_to_modify
 from utils.get_produtos import get_products_message
 from utils.message_templates import TEMPLATES
 from models.user import User
@@ -233,11 +233,35 @@ def handle_template_7(db, phone, message, message_id, last_template):
         )
         register_log(db, user_key, phone, "Resposta inválida no template 7", message_id, 7)
         
+        
 def handle_template_9(db, phone, message, message_id, last_template):
     """
     Lida com o template_value == 9, permitindo adicionar, remover ou modificar itens.
     """
     user_key = last_template.user_sender if last_template and last_template.user_sender else 'bot'
+
+    # Recuperar e formatar os itens do pedido antes de escolher entre 2 e 3
+    all_user_messages = db.query(WhatsAppLog) \
+        .filter_by(phone=phone) \
+        .filter(WhatsAppLog.user_sender == 'bot') \
+        .filter(WhatsAppLog.template == 0) \
+        .order_by(WhatsAppLog.id.asc()) \
+        .all()
+
+    filtered_messages = [
+        log_entry.message for log_entry in all_user_messages
+        if not log_entry.message.startswith("Por exemplo") and 
+          ("por favor" in log_entry.message.lower() or 
+            "os seguintes itens foram removidos:" in log_entry.message.lower() or
+            "os seguintes itens foram modificados:" in log_entry.message.lower())
+    ]
+
+    user_messages_text = "\n".join(filtered_messages)
+
+    print(f'Printando as mensagens capturadas: {user_messages_text}')
+    order_data = parse_order_items(user_messages_text)
+    items_list = order_data.get("items", [])
+    items_str = format_order_items(items_list)
 
     if message == "1":
         reply_text_message(
@@ -248,28 +272,6 @@ def handle_template_9(db, phone, message, message_id, last_template):
         )
         register_log(db, user_key, phone, 'template_base', message_id, 3)
     elif message == "2":
-        all_user_messages = db.query(WhatsAppLog) \
-            .filter_by(phone=phone) \
-            .filter(WhatsAppLog.user_sender == 'bot') \
-            .filter(WhatsAppLog.template == 0) \
-            .order_by(WhatsAppLog.id.asc()) \
-            .all()
-
-        filtered_messages = [
-            log_entry.message for log_entry in all_user_messages
-            if not log_entry.message.startswith("Por exemplo") and 
-              ("por favor" in log_entry.message.lower() or "os seguintes itens foram removidos:" in log_entry.message.lower())
-        ]
-
-
-        user_messages_text = "\n".join(filtered_messages)
-        
-        print(f'Printando as mensagens capturadas 2 {user_messages_text}')
-        order_data = parse_order_items(user_messages_text)
-        items_list = order_data.get("items", [])
-
-        items_str = format_order_items(items_list)
-
         reply_text_message(
             phone,
             f"Você escolheu remover itens. Aqui estão os pedidos:\n\n{items_str}\n\nQuais itens você deseja remover?",
@@ -343,3 +345,49 @@ def handle_template_10(db, phone, message, message_id, last_template):
         return
 
     respond_with_updated_order(db, phone, items_to_remove, updated_items_list, message_id, user_key)
+
+
+def handle_template_11(db, phone, message, message_id, last_template):
+    """
+    Lida com o template_value == 11, permitindo editar itens do pedido.
+    """
+    print('Chegamos aqui')
+    user_key = last_template.user_sender if last_template and last_template.user_sender else 'bot'
+
+    # Recuperar itens do pedido
+    items_list = get_order_items_from_logs(db, phone)
+
+    if not items_list:
+        reply_text_message(
+            phone,
+            "Não há itens no seu pedido para modificar.",
+            [],
+            'bot'
+        )
+        register_log(db, user_key, phone, 'template_sem_itens', message_id, 9)
+        return
+
+    # Identificar modificações usando a função modularizada
+    items_to_modify = parse_items_to_modify(message, items_list)
+
+    if not items_to_modify:
+        reply_text_message(
+            phone,
+            "Não consegui identificar os itens que você deseja modificar. Por favor, tente novamente.",
+            [],
+            'bot'
+        )
+        register_log(db, user_key, phone, 'template_modificar_itens_falha', message_id, 11)
+        return
+
+    modified_items_str = "\n".join([f"{item['name']}: {item['quantity']} {item['unit']}" for item in items_to_modify])
+
+    reply_text_message(
+        phone,
+        f"Os seguintes itens foram modificados:\n\n{modified_items_str}\n\n"
+        "Está tudo certo? Responda com S (Sim) para finalizar o pedido ou N (Não) para modificar novamente.",
+        [],
+        'bot'
+    )
+
+    register_log(db, user_key, phone, 'template_modificar_itens', message_id, 7)

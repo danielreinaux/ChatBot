@@ -36,7 +36,9 @@ def finalize_order(db: Session, phone: str, message_id: str, user_key: str):
     filtered_messages = [
         log_entry.message for log_entry in all_user_messages
         if not log_entry.message.startswith("Por exemplo") and 
-          ("por favor" in log_entry.message.lower() or "os seguintes itens foram removidos:" in log_entry.message.lower())
+          ("por favor" in log_entry.message.lower() or 
+            "os seguintes itens foram removidos:" in log_entry.message.lower() or
+            "os seguintes itens foram modificados:" in log_entry.message.lower())
     ]
 
 
@@ -122,7 +124,9 @@ def get_order_items_from_logs(db, phone):
     filtered_messages = [
         log_entry.message for log_entry in all_user_messages
         if not log_entry.message.startswith("Por exemplo") and 
-          ("por favor" in log_entry.message.lower() or "os seguintes itens foram removidos:" in log_entry.message.lower())
+          ("por favor" in log_entry.message.lower() or 
+            "os seguintes itens foram removidos:" in log_entry.message.lower() or
+            "os seguintes itens foram modificados:" in log_entry.message.lower())
     ]
     
 
