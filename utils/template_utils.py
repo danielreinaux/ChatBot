@@ -348,10 +348,6 @@ def handle_template_10(db, phone, message, message_id, last_template):
 
 
 def handle_template_11(db, phone, message, message_id, last_template):
-    """
-    Lida com o template_value == 11, permitindo editar itens do pedido.
-    """
-    print('Chegamos aqui')
     user_key = last_template.user_sender if last_template and last_template.user_sender else 'bot'
 
     # Recuperar itens do pedido
@@ -380,11 +376,26 @@ def handle_template_11(db, phone, message, message_id, last_template):
         register_log(db, user_key, phone, 'template_modificar_itens_falha', message_id, 11)
         return
 
-    modified_items_str = "\n".join([f"{item['name']}: {item['quantity']} {item['unit']}" for item in items_to_modify])
+    # Aplicar as modificações nos itens originais
+    # Aqui assumimos que o "items_to_modify" retorna itens no mesmo formato da lista original
+    for modified_item in items_to_modify:
+        for idx, original_item in enumerate(items_list):
+            if original_item["name"] == modified_item["name"]:
+                items_list[idx] = modified_item  # Substitui o original pelo modificado
 
+    # Gerar string dos itens modificados
+    modified_items_str = "\n".join(
+        [f"{item['name']}: {item['quantity']} {item['unit']}" for item in items_to_modify]
+    )
+
+    # Gerar string da lista completa atualizada
+    updated_items_str = format_order_items(items_list)
+
+    # Agora, exibir tanto os itens modificados quanto a lista atualizada
     reply_text_message(
         phone,
         f"Os seguintes itens foram modificados:\n\n{modified_items_str}\n\n"
+        f"Lista atualizada Final:\n{updated_items_str}\n\n"
         "Está tudo certo? Responda com S (Sim) para finalizar o pedido ou N (Não) para modificar novamente.",
         [],
         'bot'
