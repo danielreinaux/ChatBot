@@ -252,3 +252,60 @@ def parse_items_to_modify(message, items_list):
     except Exception as e:
         print(f"Erro ao chamar OpenAI: {e}")
         return []
+
+def parse_final_order_from_message(message: str) -> dict:
+    """
+    Esta função utiliza a OpenAI para analisar a mensagem final que contém a "Lista atualizada Final"
+    e retorna um JSON no formato:
+    {
+      "items": [
+        {"name": "Maçã", "quantity": 2, "unit": "kg"},
+        {"name": "Banana", "quantity": 2, "unit": "kg"}
+      ]
+    }
+
+    Caso não encontre itens, retorna {"items": []}.
+    """
+    prompt = f"""
+O usuário recebeu a seguinte mensagem:
+
+\"\"\"{message}\"\"\"
+
+Essa mensagem contém uma 'Lista atualizada Final' de itens. Extraia todos os itens desta lista final no formato JSON:
+
+{{
+  "items": [
+    {{
+      "name": "<nome_do_item>",
+      "quantity": <quantidade>,
+      "unit": "<unidade>"
+    }},
+    ...
+  ]
+}}
+
+Observações:
+- O nome do item deve ser capitalizado (ex: "Maçã").
+- A quantidade deve ser um número inteiro.
+- A unidade deve ser curta (ex: "kg", "un", "duzia"). 
+- Se não encontrar itens, retorne {{ "items": [] }}.
+- Não adicione explicações, retorne apenas o JSON final.
+    """
+
+    response = openai.ChatCompletion.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": "Você é um assistente que extrai itens da mensagem."},
+            {"role": "user", "content": prompt}
+        ],
+        max_tokens=300,
+        temperature=0
+    )
+    content = response.choices[0].message['content'].strip()
+    try:
+        data = json.loads(content)
+        if "items" not in data:
+            data = {"items": []}
+    except:
+        data = {"items": []}
+    return data

@@ -6,6 +6,10 @@ from utils.openai import parse_order_items, parse_all_items
 from utils.message_templates import TEMPLATES
 from sqlalchemy.orm import Session
 from models.whatsapp_log import WhatsAppLog
+from models.vendas import Vendas
+import uuid
+from models.user import User
+from datetime import datetime
 
 
 
@@ -177,7 +181,7 @@ def respond_with_updated_order(db, phone, items_to_remove, updated_items_list, m
 
     reply_text_message(
         phone,
-        f"Os seguintes itens foram removidos:\n\n{removed_items_str}\n\nLista atualizada Final:\n{items_str}\n\nEstá tudo certo? Responda com S (Sim) para finalizar o pedido ou N (Não) para modificar novamente.",
+        f"Os seguintes itens foram removidos:\n\n{removed_items_str}\n\nLista atualizada final:\n{items_str}\n\nEstá tudo certo? Responda com S (Sim) para finalizar o pedido ou N (Não) para modificar novamente.",
         [],
         'bot'
     )
@@ -186,3 +190,56 @@ def respond_with_updated_order(db, phone, items_to_remove, updated_items_list, m
     register_log(db, user_key, phone, 'template_confirmar_remocao', message_id, 7)
     
     
+def simulate_order_flow(db, phone, user_key):
+    """
+    Simula o fluxo do pedido do backoffice inexistente, enviando mensagens de status ao cliente.
+    Você pode ajustar delays (usando time.sleep) se quiser simular tempo real.
+    """
+    # Status 1: Análise
+    reply_text_message(phone, "Seu pedido foi recebido e está em análise.", [], 'bot')
+    register_log(db, user_key, phone, 'pedido_em_analise', '', 0)
+    # time.sleep(2) # opcional
+
+    # Status 2: Conferência de Pedidos
+    reply_text_message(phone, "Seu pedido está correto e foi enviado para separação.", [], 'bot')
+    register_log(db, user_key, phone, 'pedido_enviado_separacao', '', 0)
+    # time.sleep(2) # opcional
+
+    # Status 3: Separação
+    reply_text_message(phone, "Seu pedido está sendo separado.", [], 'bot')
+    register_log(db, user_key, phone, 'pedido_sendo_separado', '', 0)
+    # time.sleep(2) # opcional
+
+    # Status 4: Conferência de Peso (opcionalmente informar o cliente)
+    reply_text_message(phone, "Estamos conferindo o peso dos itens do seu pedido.", [], 'bot')
+    register_log(db, user_key, phone, 'conferencia_de_peso', '', 0)
+    # time.sleep(2) # opcional
+
+    # Status 5: Liberação para Entrega
+    reply_text_message(phone, "Seu pedido foi liberado para entrega! Em breve você receberá sua encomenda.", [], 'bot')
+    register_log(db, user_key, phone, 'pedido_liberado_entrega', '', 0)
+    
+def get_last_final_list_message(db: Session, phone: str) -> str:
+    """
+    Retorna a última mensagem do bot para este telefone que contenha "Lista atualizada Final:"
+    """
+    last_msg_list = db.query(WhatsAppLog) \
+    .order_by(WhatsAppLog.id.desc()) \
+    .all()
+
+    for msg in last_msg_list:
+        if "Lista atualizada Final:" in msg.message or "lista atualizada final" in msg.message:
+            return msg.message
+    return None
+
+def create_venda(db: Session, user: User, items_list: list):
+    valor_total = 0.00 
+    nova_venda = Vendas(
+        produtos=items_list,
+        data_compra=datetime.now(),
+        valor_total=valor_total,
+        status="Em Análise",
+        phone=user.phone  # Adiciona o phone do usuário aqui
+    )
+    db.add(nova_venda)
+    db.commit()

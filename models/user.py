@@ -1,10 +1,7 @@
 from sqlalchemy import Column, Integer, String, DateTime, func
 from sqlalchemy.orm import validates
-from sqlalchemy.ext.declarative import declarative_base
 from passlib.hash import pbkdf2_sha256  # Substituímos bcrypt por pbkdf2_sha256
-from datetime import datetime
-
-Base = declarative_base()
+from database.base import Base
 
 class User(Base):
     __tablename__ = "users"  # Nome da tabela no banco de dados

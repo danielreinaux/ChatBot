@@ -81,7 +81,7 @@ S = Sim
 N = Não
 """,
     "template_finalizar_pedido": """
-Seu pedido está quase pronto! Aqui está o resumo:
+Seu pedido está quase pronto! Essa é a lista atualizada final:
 
 {{1}}
 

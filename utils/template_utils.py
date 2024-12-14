@@ -4,14 +4,14 @@ from utils.message_utils import (
     reply_single_message_template,
     reply_text_message
 )
-from utils.openai import parse_order_items, process_response, parse_items_to_remove, parse_items_to_modify
+from utils.openai import parse_order_items, process_response, parse_items_to_remove, parse_items_to_modify, parse_final_order_from_message
 from utils.get_produtos import get_products_message
 from utils.message_templates import TEMPLATES
 from models.user import User
 import uuid
 from sqlalchemy.orm import Session
 from models.whatsapp_log import WhatsAppLog
-from utils.aux_utils import format_order_items, finalize_order, continue_order, handle_invalid_response, get_order_items_from_logs, remove_selected_items, respond_with_updated_order
+from utils.aux_utils import format_order_items, finalize_order, continue_order, handle_invalid_response, get_order_items_from_logs, remove_selected_items, respond_with_updated_order, get_last_final_list_message, create_venda
 
 def handle_template_0(db, phone, message, message_id):
     """
@@ -199,13 +199,9 @@ def handle_template_5(db, phone, message, message_id, last_template):
     )
     register_log(db, user_key, phone, 'template_base', message_id, 0)
     
-def handle_template_7(db, phone, message, message_id, last_template):
-    """
-    Lida com o template_value == 7, permitindo confirmar ou modificar o pedido.
-    """
+def handle_template_7(db: Session, phone: str, message: str, message_id: str, last_template):
     user_key = last_template.user_sender
     user = db.query(User).filter_by(key=user_key).first()
-
     user_choice = message.strip().upper()
 
     if user_choice == "S":
@@ -216,14 +212,22 @@ def handle_template_7(db, phone, message, message_id, last_template):
             user_key
         )
         register_log(db, user_key, phone, "Pedido confirmado", message_id, 8)
+
+        # Buscar a última mensagem do bot que contenha "Lista atualizada Final:"
+        last_final_list_msg = get_last_final_list_message(db, phone)
+        print('-----------------------Mensagem final------------------------')
+        print(last_final_list_msg)
+        if last_final_list_msg:
+            # Extrair itens usando o GPT
+            order_data = parse_final_order_from_message(last_final_list_msg)
+            items_list = order_data.get("items", [])
+
+            # Criar registro na tabela de vendas
+            create_venda(db, user, items_list)
+
     elif user_choice == "N":
-        reply_text_message(
-            phone,
-            TEMPLATES["template_opcoes_modificacao"],
-            [],
-            user_key
-        )
-        register_log(db, user_key, phone, "Pedido para modificação", message_id, 9)
+        # Lógica caso o usuário queira modificar
+        pass
     else:
         reply_text_message(
             phone,
@@ -232,6 +236,7 @@ def handle_template_7(db, phone, message, message_id, last_template):
             user_key
         )
         register_log(db, user_key, phone, "Resposta inválida no template 7", message_id, 7)
+
         
         
 def handle_template_9(db, phone, message, message_id, last_template):
@@ -395,7 +400,7 @@ def handle_template_11(db, phone, message, message_id, last_template):
     reply_text_message(
         phone,
         f"Os seguintes itens foram modificados:\n\n{modified_items_str}\n\n"
-        f"Lista atualizada Final:\n{updated_items_str}\n\n"
+        f"Lista atualizada final:\n{updated_items_str}\n\n"
         "Está tudo certo? Responda com S (Sim) para finalizar o pedido ou N (Não) para modificar novamente.",
         [],
         'bot'
