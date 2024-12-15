@@ -4,7 +4,7 @@ from utils.message_utils import (
     reply_single_message_template,
     reply_text_message
 )
-from utils.openai import parse_order_items, process_response, parse_items_to_remove, parse_items_to_modify, parse_final_order_from_message
+from utils.openai import parse_order_items, process_response, parse_items_to_remove, parse_items_to_modify, parse_final_order_from_message, parse_customer_data
 from utils.get_produtos import get_products_message
 from utils.message_templates import TEMPLATES
 from models.user import User
@@ -208,23 +208,37 @@ def handle_template_7(db: Session, phone: str, message: str, message_id: str, la
     user_choice = message.strip().upper()
 
     if user_choice == "S":
-        reply_text_message(
-            phone,
-            "Pedido encaminhado para nossa loja, agradecemos o pedido e traremos atualizações nos próximos dias.",
-            [],
-            user_key
-        )
-        register_log(db, user_key, phone, "Pedido confirmado", message_id, 12)
+        cliente = db.execute(
+            text("SELECT * FROM clientes WHERE telefone = :telefone"),
+            {"telefone": phone}
+        ).fetchone()
 
-        # Buscar a última mensagem do bot que contenha "Lista atualizada Final:"
-        last_final_list_msg = get_last_final_list_message(db, phone)
-        if last_final_list_msg:
-            # Extrair itens usando o GPT
-            order_data = parse_final_order_from_message(last_final_list_msg)
-            items_list = order_data.get("items", [])
+        if cliente:
+            # Cliente já existe, tem dados
+            email = cliente.email
+            endereco = cliente.endereco
 
-            # Criar registro na tabela de vendas
-            create_venda(db, user, items_list)
+            reply_text_message(
+                phone,
+                f"Seus dados cadastrados são:\nEmail: {email}\nEndereço: {endereco}\n\n"
+                "Tudo certo com esses dados?\n\nS = Sim\nN = Não",
+                [],
+                user_key
+            )
+            # Agora aguarda a resposta no template 15
+            register_log(db, user_key, phone, "Confirmar dados existentes", message_id, 15)
+
+        else:
+            # Não existe o cliente cadastrado, pedir dados
+            reply_text_message(
+                phone,
+                "Não encontramos seus dados de cadastro. Por favor, informe seu email, endereço e a forma que fará o pagamento (Crédito, Pix, Débito etc)\n\n"
+                "Exemplo: 'Meu email é fulano@gmail.com e meu endereço é Rua Exemplo 123'",
+                [],
+                user_key
+            )
+            # Aguardar o usuário mandar os dados, template 16
+            register_log(db, user_key, phone, "Solicitar dados cadastro", message_id, 16)
 
     elif user_choice == "N":
         # Se não está tudo certo, redirecionar para o menu de modificação (template 9)
@@ -493,3 +507,84 @@ def handle_template_13(db: Session, phone: str, message: str, message_id: str, l
             user_key
         )
         register_log(db, user_key, phone, "menu_pos_finalizacao_invalido", message_id, 13)
+
+def handle_template_15(db: Session, phone: str, message: str, message_id: str, last_template):
+    user_key = last_template.user_sender
+    user = db.query(User).filter_by(key=user_key).first()
+    user_choice = message.strip().upper()
+
+    if user_choice == "S":
+        # Dados confirmados, agora criar a venda
+        last_final_list_msg = get_last_final_list_message(db, phone)
+        if last_final_list_msg:
+            order_data = parse_final_order_from_message(last_final_list_msg)
+            items_list = order_data.get("items", [])
+            create_venda(db, user, items_list)
+
+        reply_text_message(
+            phone,
+            "Pedido encaminhado para nossa loja, agradecemos o pedido e traremos atualizações nos próximos dias.",
+            [],
+            user_key
+        )
+        register_log(db, user_key, phone, "Pedido confirmado com dados existentes", message_id, 12)
+
+    elif user_choice == "N":
+        # Usuário quer alterar os dados
+        reply_text_message(
+            phone,
+            "Entendi, por favor informe os campos email, endereço e forma de pagamento atualizado.",
+            [],
+            user_key
+        )
+        register_log(db, user_key, phone, "Alterar dados", message_id, 16)
+
+    else:
+        reply_text_message(
+            phone,
+            "Por favor, responda com S (Sim) ou N (Não).",
+            [],
+            user_key
+        )
+        register_log(db, user_key, phone, "Resposta inválida no template 15", message_id, 15)
+
+def handle_template_16(db: Session, phone: str, message: str, message_id: str, last_template):
+    user_key = last_template.user_sender
+    user = db.query(User).filter_by(key=user_key).first()
+
+    # Chama a função OpenAI para extrair email e endereço
+    customer_data = parse_customer_data(message)  # retorna algo como {"email": "...", "endereco": "..."}
+
+    email = customer_data.get("email", "")
+    endereco = customer_data.get("endereco", "")
+
+    if not email or not endereco:
+        reply_text_message(
+            phone,
+            "Não consegui identificar seu email ou endereço. Por favor, tente novamente.\n"
+            "Informe seu email e endereço em uma frase clara.",
+            [],
+            user_key
+        )
+        register_log(db, user_key, phone, 'Dados incompletos', message_id, 16)
+        return
+
+    reply_text_message(
+        phone,
+        f"Entendi, seus dados são:\nEmail: {email}\nEndereço: {endereco}\n\n"
+        "Tudo certo?\nS = Sim\nN = Não",
+        [],
+        user_key
+    )
+    
+    new_guid = str(uuid.uuid4())
+    db.execute(text("""
+        INSERT INTO clientes (guid, telefone, email, endereco) 
+        VALUES (:guid, :telefone, :email, :endereco)
+        ON CONFLICT (telefone) DO UPDATE 
+        SET email = EXCLUDED.email, endereco = EXCLUDED.endereco
+    """), {"guid": new_guid, "telefone": phone, "email": email, "endereco": endereco})
+
+    db.commit()
+
+    register_log(db, user_key, phone, 'Confirmar dados inseridos', message_id, 15)

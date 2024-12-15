@@ -309,3 +309,54 @@ Observações:
     except:
         data = {"items": []}
     return data
+  
+def parse_customer_data(user_input: str) -> dict:
+    """
+    Usa a API da OpenAI para extrair email e endereço do texto fornecido pelo usuário.
+    Retorna um dict no formato: {"email": "...", "endereco": "..."}.
+    Se não encontrar algum dos campos, retorna vazio ou não inclui a chave.
+    """
+
+    # Prompt descrevendo o que queremos
+    prompt = f"""
+O usuário forneceu o seguinte texto: "{user_input}"
+
+A partir desse texto, extraia o email e o endereço do usuário.
+Se não encontrar email ou endereço, retorne vazio para esse campo.
+
+Formato de saída (JSON):
+{{
+  "email": "<email ou vazio>",
+  "endereco": "<endereco ou vazio>"
+}}
+Não explique nada além do JSON de saída.
+"""
+
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "Você é um assistente que extrai dados do texto do usuário."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=300,
+            temperature=0
+        )
+
+        content = response.choices[0].message['content'].strip()
+
+        # Tenta fazer o parse do JSON retornado
+        data = json.loads(content)
+
+        # Garantir que exista "email" e "endereco" no dicionário, caso contrário, usar vazio
+        email = data.get("email", "").strip()
+        endereco = data.get("endereco", "").strip()
+
+        return {
+            "email": email,
+            "endereco": endereco
+        }
+
+    except Exception as e:
+        print(f"Erro ao chamar OpenAI: {e}")
+        return {"email": "", "endereco": ""}
