@@ -30,12 +30,20 @@ def finalize_order(db: Session, phone: str, message_id: str, user_key: str):
     """
     Função para finalizar o pedido quando o usuário escolhe 'N'.
     """
-    all_user_messages = db.query(WhatsAppLog) \
-        .filter_by(phone=phone) \
-        .filter(WhatsAppLog.user_sender == 'bot') \
-        .filter(WhatsAppLog.template == 0) \
-        .order_by(WhatsAppLog.id.asc()) \
-        .all()
+
+    # Encontrar o último log que marca o fim do último pedido
+    last_end_log = db.query(WhatsAppLog) \
+        .filter_by(phone=phone, template=13) \
+        .order_by(WhatsAppLog.id.desc()) \
+        .first()
+
+    query = db.query(WhatsAppLog) \
+        .filter_by(phone=phone, user_sender='bot', template=0)
+
+    if last_end_log:
+        query = query.filter(WhatsAppLog.id > last_end_log.id)
+
+    all_user_messages = query.order_by(WhatsAppLog.id.asc()).all()
 
     filtered_messages = [
         log_entry.message for log_entry in all_user_messages
@@ -118,12 +126,19 @@ def get_order_items_from_logs(db, phone):
     Returns:
         list: Lista de itens extraídos das mensagens anteriores.
     """
-    all_user_messages = db.query(WhatsAppLog) \
-        .filter_by(phone=phone) \
-        .filter(WhatsAppLog.user_sender == 'bot') \
-        .filter(WhatsAppLog.template == 0) \
-        .order_by(WhatsAppLog.id.asc()) \
-        .all()
+    # Encontrar o último log de final de pedido
+    last_end_log = db.query(WhatsAppLog) \
+        .filter_by(phone=phone, template=13) \
+        .order_by(WhatsAppLog.id.desc()) \
+        .first()
+
+    query = db.query(WhatsAppLog) \
+        .filter_by(phone=phone, user_sender='bot', template=0)
+
+    if last_end_log:
+        query = query.filter(WhatsAppLog.id > last_end_log.id)
+
+    all_user_messages = query.order_by(WhatsAppLog.id.asc()).all()
 
     filtered_messages = [
         log_entry.message for log_entry in all_user_messages
@@ -232,14 +247,15 @@ def get_last_final_list_message(db: Session, phone: str) -> str:
             return msg.message
     return None
 
-def create_venda(db: Session, user: User, items_list: list):
+def create_venda(db: Session, user: User, items_list: list, pagamento: str):
     valor_total = 0.00 
     nova_venda = Vendas(
         produtos=items_list,
         data_compra=datetime.now(),
         valor_total=valor_total,
         status="Em Análise",
-        phone=user.phone  # Adiciona o phone do usuário aqui
+        phone=user.phone,  # Adiciona o phone do usuário aqui
+        forma_pagamento = pagamento
     )
     db.add(nova_venda)
     db.commit()

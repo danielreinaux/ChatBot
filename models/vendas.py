@@ -18,6 +18,7 @@ class Vendas(Base):
     deleted_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), server_default=text('now()'))
     updated_at = Column(DateTime(timezone=True), server_default=text('now()'), onupdate=text('now()'))
+    forma_pagamento = Column(String, nullable=True)
 
     # Agora adicionamos a ForeignKey aqui também:
     phone = Column(String(15))

@@ -206,6 +206,18 @@ def handle_template_7(db: Session, phone: str, message: str, message_id: str, la
     user_key = last_template.user_sender
     user = db.query(User).filter_by(key=user_key).first()
     user_choice = message.strip().upper()
+    
+    
+    last_sale = db.execute(
+            text("""
+                SELECT forma_pagamento 
+                FROM vendas 
+                WHERE phone = :phone
+                ORDER BY created_at DESC
+                LIMIT 1
+            """),
+            {"phone": phone}
+        ).fetchone()
 
     if user_choice == "S":
         cliente = db.execute(
@@ -217,13 +229,16 @@ def handle_template_7(db: Session, phone: str, message: str, message_id: str, la
             # Cliente já existe, tem dados
             email = cliente.email
             endereco = cliente.endereco
+            forma_pagamento = last_sale.forma_pagamento if last_sale else "Não informado"
 
             reply_text_message(
                 phone,
-                f"Seus dados cadastrados são:\nEmail: {email}\nEndereço: {endereco}\n\n"
+                f"Seus dados cadastrados são:\n"
+                f"Email: {email}\n"
+                f"Endereço: {endereco}\n"
+                f"Forma de pagamento: {forma_pagamento}\n\n"
                 "Tudo certo com esses dados?\n\nS = Sim\nN = Não",
-                [],
-                user_key
+                [], user_key
             )
             # Agora aguarda a resposta no template 15
             register_log(db, user_key, phone, "Confirmar dados existentes", message_id, 15)
@@ -267,13 +282,20 @@ def handle_template_9(db, phone, message, message_id, last_template):
     """
     user_key = last_template.user_sender if last_template and last_template.user_sender else 'bot'
 
-    # Recuperar e formatar os itens do pedido antes de escolher entre 2 e 3
-    all_user_messages = db.query(WhatsAppLog) \
-        .filter_by(phone=phone) \
-        .filter(WhatsAppLog.user_sender == 'bot') \
-        .filter(WhatsAppLog.template == 0) \
-        .order_by(WhatsAppLog.id.asc()) \
-        .all()
+    # 1. Encontrar o último log com template=16 (que marca o fim do último pedido)
+    last_end_log = db.query(WhatsAppLog) \
+        .filter_by(phone=phone, template=13) \
+        .order_by(WhatsAppLog.id.desc()) \
+        .first()
+
+    # 2. Construir a query para pegar mensagens do template=0 (itens do pedido atual)
+    query = db.query(WhatsAppLog) \
+        .filter_by(phone=phone, user_sender='bot', template=0)
+        
+    if last_end_log:
+        query = query.filter(WhatsAppLog.id > last_end_log.id)
+
+    all_user_messages = query.order_by(WhatsAppLog.id.asc()).all()
 
     filtered_messages = [
         log_entry.message for log_entry in all_user_messages
@@ -514,18 +536,27 @@ def handle_template_15(db: Session, phone: str, message: str, message_id: str, l
     user_choice = message.strip().upper()
 
     if user_choice == "S":
+        # Recuperar a forma de pagamento do último log com template 16
+        last_payment_log = db.query(WhatsAppLog) \
+            .filter_by(phone=phone, template=16) \
+            .order_by(WhatsAppLog.id.desc()) \
+            .first()
+
+        forma_pagamento = ""
+        if last_payment_log and "Forma de pagamento:" in last_payment_log.message:
+            forma_pagamento = last_payment_log.message.split("Forma de pagamento:")[1].strip()
+
         # Dados confirmados, agora criar a venda
         last_final_list_msg = get_last_final_list_message(db, phone)
         if last_final_list_msg:
             order_data = parse_final_order_from_message(last_final_list_msg)
             items_list = order_data.get("items", [])
-            create_venda(db, user, items_list)
+            create_venda(db, user, items_list, pagamento=forma_pagamento)
 
         reply_text_message(
             phone,
             "Pedido encaminhado para nossa loja, agradecemos o pedido e traremos atualizações nos próximos dias.",
-            [],
-            user_key
+            [], user_key
         )
         register_log(db, user_key, phone, "Pedido confirmado com dados existentes", message_id, 12)
 
@@ -533,9 +564,8 @@ def handle_template_15(db: Session, phone: str, message: str, message_id: str, l
         # Usuário quer alterar os dados
         reply_text_message(
             phone,
-            "Entendi, por favor informe os campos email, endereço e forma de pagamento atualizado.",
-            [],
-            user_key
+            "Entendi, por favor informe os campos email, endereço e forma de pagamento atualizados.",
+            [], user_key
         )
         register_log(db, user_key, phone, "Alterar dados", message_id, 16)
 
@@ -543,10 +573,10 @@ def handle_template_15(db: Session, phone: str, message: str, message_id: str, l
         reply_text_message(
             phone,
             "Por favor, responda com S (Sim) ou N (Não).",
-            [],
-            user_key
+            [], user_key
         )
         register_log(db, user_key, phone, "Resposta inválida no template 15", message_id, 15)
+
 
 def handle_template_16(db: Session, phone: str, message: str, message_id: str, last_template):
     user_key = last_template.user_sender
@@ -557,34 +587,40 @@ def handle_template_16(db: Session, phone: str, message: str, message_id: str, l
 
     email = customer_data.get("email", "")
     endereco = customer_data.get("endereco", "")
+    forma_pagamento = customer_data.get("forma_pagamento", "")
 
-    if not email or not endereco:
+    if not email or not endereco or not forma_pagamento:
         reply_text_message(
             phone,
-            "Não consegui identificar seu email ou endereço. Por favor, tente novamente.\n"
-            "Informe seu email e endereço em uma frase clara.",
-            [],
-            user_key
+            "Não consegui identificar seu email, endereço ou forma de pagamento. Por favor, tente novamente.\n"
+            "Informe seu email, endereço e forma de pagamento (Crédito, Pix, Débito etc) em uma frase clara.",
+            [], user_key
         )
         register_log(db, user_key, phone, 'Dados incompletos', message_id, 16)
         return
 
-    reply_text_message(
-        phone,
-        f"Entendi, seus dados são:\nEmail: {email}\nEndereço: {endereco}\n\n"
-        "Tudo certo?\nS = Sim\nN = Não",
-        [],
-        user_key
-    )
     
     new_guid = str(uuid.uuid4())
+    user_name = user.full_name if user and user.full_name else "Nome não informado"
+    
     db.execute(text("""
-        INSERT INTO clientes (guid, telefone, email, endereco) 
-        VALUES (:guid, :telefone, :email, :endereco)
+        INSERT INTO clientes (guid, nome, telefone, email, endereco) 
+        VALUES (:guid, :nome, :telefone, :email, :endereco)
         ON CONFLICT (telefone) DO UPDATE 
-        SET email = EXCLUDED.email, endereco = EXCLUDED.endereco
-    """), {"guid": new_guid, "telefone": phone, "email": email, "endereco": endereco})
+        SET nome = EXCLUDED.nome, email = EXCLUDED.email, endereco = EXCLUDED.endereco
+    """), {"guid": new_guid, "nome": user_name, "telefone": phone, "email": email, "endereco": endereco})
 
     db.commit()
 
+    # Registrar a forma de pagamento no log temporariamente
+    register_log(db, user_key, phone, f"Forma de pagamento: {forma_pagamento}", message_id, 16)
+
+    # Confirmação para o usuário
+    reply_text_message(
+        phone,
+        f"Entendi, seus dados são:\nEmail: {email}\nEndereço: {endereco}\nForma de pagamento: {forma_pagamento}\n\n"
+        "Tudo certo?\nS = Sim\nN = Não",
+        [], user_key
+    )
+    
     register_log(db, user_key, phone, 'Confirmar dados inseridos', message_id, 15)

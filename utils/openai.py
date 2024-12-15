@@ -312,22 +312,24 @@ Observações:
   
 def parse_customer_data(user_input: str) -> dict:
     """
-    Usa a API da OpenAI para extrair email e endereço do texto fornecido pelo usuário.
-    Retorna um dict no formato: {"email": "...", "endereco": "..."}.
-    Se não encontrar algum dos campos, retorna vazio ou não inclui a chave.
+    Usa a API da OpenAI para extrair email, endereço e tipo de pagamento do texto fornecido pelo usuário.
+    Retorna um dict no formato: {"email": "...", "endereco": "...", "forma_pagamento": "..."}.
+    Se não encontrar algum dos campos, retorna vazio para esse campo.
     """
 
     # Prompt descrevendo o que queremos
     prompt = f"""
 O usuário forneceu o seguinte texto: "{user_input}"
 
-A partir desse texto, extraia o email e o endereço do usuário.
-Se não encontrar email ou endereço, retorne vazio para esse campo.
+A partir desse texto, extraia o email, o endereço e a forma de pagamento do usuário.
+As formas de pagamento podem ser: "Crédito", "Débito", "Pix" ou outras formas similares.
+Se não encontrar email, endereço ou forma de pagamento, retorne vazio para esses campos.
 
 Formato de saída (JSON):
 {{
   "email": "<email ou vazio>",
-  "endereco": "<endereco ou vazio>"
+  "endereco": "<endereco ou vazio>",
+  "forma_pagamento": "<forma de pagamento ou vazio>"
 }}
 Não explique nada além do JSON de saída.
 """
@@ -348,15 +350,17 @@ Não explique nada além do JSON de saída.
         # Tenta fazer o parse do JSON retornado
         data = json.loads(content)
 
-        # Garantir que exista "email" e "endereco" no dicionário, caso contrário, usar vazio
+        # Garantir que exista "email", "endereco" e "forma_pagamento" no dicionário, caso contrário, usar vazio
         email = data.get("email", "").strip()
         endereco = data.get("endereco", "").strip()
+        forma_pagamento = data.get("forma_pagamento", "").strip()
 
         return {
             "email": email,
-            "endereco": endereco
+            "endereco": endereco,
+            "forma_pagamento": forma_pagamento
         }
 
     except Exception as e:
         print(f"Erro ao chamar OpenAI: {e}")
-        return {"email": "", "endereco": ""}
+        return {"email": "", "endereco": "", "forma_pagamento": ""}
