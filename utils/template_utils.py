@@ -57,6 +57,8 @@ def handle_template_1(db, phone, message, message_id):
     """
     # Verificar se o usuário já existe pelo número de telefone
     existing_user = db.query(User).filter_by(phone=phone).first()
+    
+    user_name = message if message else "Nome não informado"
 
     if not existing_user:
         # Gerar uma chave única para o novo usuário
@@ -66,20 +68,22 @@ def handle_template_1(db, phone, message, message_id):
         new_user = User(
             key=user_key,
             phone=phone,
-            full_name=message,
+            full_name=user_name,
             email='',
             password=User.hash_password('senhatemporaria')
         )
         
         db.add(new_user)
         db.commit()
+
     else:
         # Se o usuário já existe, usa a chave dele
         user_key = existing_user.key
+        user_name = existing_user.full_name
 
     # Enviar o template e registrar o log (parte idêntica para ambos os casos)
     reply_single_message_template(
-        phone, 'template_inicial_classificado', message, 'bot'
+        phone, 'template_inicial_classificado', user_name, 'bot'
     )
     register_log(db, user_key, phone, 'template_inicial_classificado', message_id, 2)
     
@@ -116,6 +120,80 @@ def handle_template_2(db, phone, message, message_id, last_template):
             db, last_template.user_sender, phone, 'template_base', message_id, 4
         )
 
+    elif message == "3":
+        # Enviar mensagem única informando contato com o atendente e opções de navegação
+        reply_text_message(
+            phone,
+            "Em breve nossa equipe entrará em contato para atendê-lo. \n\n"
+            "Além disso, selecione uma opção:\n\n"
+            "1️⃣ Voltar ao menu principal\n"
+            "2️⃣ Encerrar atendimento",
+            [],
+            'bot'
+        )
+
+        # Registrar log com template_value 4 para permitir voltar ao menu principal
+        register_log(db, '', phone, 'template_base', message_id, 4)
+        
+    elif message == "4":
+        # Consultando o status do pedido
+        venda = db.execute(
+            text("""
+                SELECT produtos, status, created_at 
+                FROM vendas 
+                WHERE phone = :phone 
+                ORDER BY created_at DESC 
+                LIMIT 1
+            """),
+            {"phone": phone}
+        ).fetchone()
+
+        if venda:
+            produtos = venda.produtos
+            status = venda.status
+            data_compra = venda.created_at.strftime("%d/%m/%Y %H:%M")
+
+            produtos_str = "\n".join(
+                [f"- {item['name']}: {item['quantity']} {item['unit']}" for item in produtos]
+            )
+
+            reply_text_message(
+                phone,
+                f"Seu pedido realizado em {data_compra} está com o status: *{status}*.\n\n"
+                f"Itens do pedido:\n{produtos_str}\n\n"
+                "Selecione uma opção:\n\n"
+                "1️⃣ Voltar ao menu principal\n"
+                "2️⃣ Encerrar atendimento",
+                [],
+                'bot'
+            )
+
+        else:
+            # Caso não haja pedidos para este telefone
+            reply_text_message(
+                phone,
+                "Você não tem pedidos registrados.\n\n"
+                "Selecione uma opção:\n\n"
+                "1️⃣ Voltar ao menu principal\n"
+                "2️⃣ Encerrar atendimento",
+                [],
+                'bot'
+            )
+
+        # Registrar log com template_value 4 para permitir voltar ao menu principal ou encerrar o atendimento
+        register_log(db, last_template.user_sender, phone, 'template_consultar_status', message_id, 4)
+        
+    elif message == "5":
+          reply_text_message(
+            phone,
+            "Por favor, envie seu feedback sobre o nosso atendimento. Sua opinião é muito importante para nós! 😊",
+            [],
+            'bot'
+          )
+
+          # Registrar log com template_value 8 para tratar o recebimento do feedback
+          register_log(db, last_template.user_sender, phone, 'template_feedback_request', message_id, 8)
+    
     else:
         # Para entradas inválidas, enviar uma mensagem padrão com instruções claras
         reply_text_message(
@@ -193,14 +271,14 @@ def handle_template_5(db, phone, message, message_id, last_template):
     """
     user_key = last_template.user_sender
     user = db.query(User).filter_by(key=user_key).first()
-    user_name = user.full_name if user else ''
 
-    reply_single_message(
-        phone, 'template_base',
+    reply_text_message(
+        phone,
         'O atendimento já foi encerrado. Caso necessite de algo mais, por favor inicie uma nova conversa. 😊',
+        [],
         'bot'
     )
-    register_log(db, user_key, phone, 'template_base', message_id, 0)
+    register_log(db, user_key, phone, 'template_base', message_id, 1)
     
 def handle_template_7(db: Session, phone: str, message: str, message_id: str, last_template):
     user_key = last_template.user_sender
@@ -248,7 +326,7 @@ def handle_template_7(db: Session, phone: str, message: str, message_id: str, la
             reply_text_message(
                 phone,
                 "Não encontramos seus dados de cadastro. Por favor, informe seu email, endereço e a forma que fará o pagamento (Crédito, Pix, Débito etc)\n\n"
-                "Exemplo: 'Meu email é fulano@gmail.com e meu endereço é Rua Exemplo 123'",
+                "Exemplo: 'Meu email é fulano@gmail.com, o meu endereço é Rua Exemplo 123 e a forma de pagamento será Débito'",
                 [],
                 user_key
             )
@@ -274,8 +352,33 @@ def handle_template_7(db: Session, phone: str, message: str, message_id: str, la
         )
         register_log(db, user_key, phone, "Resposta inválida no template 7", message_id, 7)
 
+def handle_template_8(db, phone, message, message_id, last_template):
+    """
+    Lida com o feedback enviado pelo usuário e oferece opções para continuar.
+    """
+    user_key = last_template.user_sender
+    user = db.query(User).filter_by(key=user_key).first()
+    
+    # Registrar o feedback recebido no log
+    register_log(db, user_key, phone, f'Feedback recebido: {message}', message_id, 4)
+
+    # Confirmar o recebimento do feedback e oferecer opções
+    reply_text_message(
+        phone,
+        "Obrigado pelo seu feedback! Ele foi enviado para a nossa equipe. 😊\n\n"
+        "Selecione uma opção:\n\n"
+        "1️⃣ Voltar ao menu principal\n"
+        "2️⃣ Encerrar atendimento",
+        [],
+        'bot'
+    )
+
+    # Registrar log com template_value 4 para permitir voltar ao menu principal ou encerrar o atendimento
+    register_log(db, user_key, phone, 'template_feedback_confirmation', message_id, 4)
+
         
         
+
 def handle_template_9(db, phone, message, message_id, last_template):
     """
     Lida com o template_value == 9, permitindo adicionar, remover ou modificar itens.
@@ -458,7 +561,7 @@ def handle_template_12(db: Session, phone: str, message: str, message_id: str, l
     
     reply_text_message(
         phone,
-        "Vimos que você já realizou um pedido.\n\n"
+        "Olá! Parece que você já realizou um pedido conosco. O que deseja fazer agora? \n\n"
         "1️⃣ Ver status e itens do pedido\n"
         "2️⃣ Fazer um novo pedido",
         [],

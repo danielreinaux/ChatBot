@@ -1,21 +1,17 @@
-from database.base import Base, engine
-from database.session import get_db
-from models.whatsapp_log import WhatsAppLog
+from flask import Flask
+from controllers.whatsapp_controller import WhatsAppController
 
-def init_db():
-    # Criação das tabelas no banco de dados
-    Base.metadata.create_all(bind=engine)
-    print("✅ Banco de dados inicializado com sucesso!")
+app = Flask(__name__)
 
-def test_connection():
-    try:
-        db = next(get_db())
-        print("✅ Conexão com o banco de dados estabelecida!")
-    except Exception as e:
-        print(f"❌ Erro ao conectar ao banco de dados: {e}")
-    finally:
-        db.close()
+# Rota para verificar o webhook
+@app.route('/api/register_webhook', methods=['GET'])
+def register_webhook():
+    return WhatsAppController.register_webhook()
+
+# Rota principal para receber mensagens do webhook
+@app.route('/api', methods=['POST'])
+def webhook():
+    return WhatsAppController.webhook()
 
 if __name__ == "__main__":
-    test_connection()
-    init_db()
+    app.run(host="0.0.0.0", port=5000, debug=True)
